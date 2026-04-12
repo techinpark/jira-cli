@@ -33,6 +33,8 @@ brew tap techinpark/tap
 brew install techinpark/tap/jira-cloud-cli
 ```
 
+Homebrew installs the binary as `jira-cloud-cli` to avoid name collisions with an existing Homebrew `jira-cli` formula.
+
 ## Authentication
 
 `jira-cli` uses Jira Cloud `email + API token` authentication and supports multiple named profiles.

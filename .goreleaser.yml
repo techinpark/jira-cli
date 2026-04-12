@@ -25,4 +25,5 @@ brews:
     homepage: https://github.com/techinpark/jira-cli
     description: Jira CLI for Jira Cloud REST API v3
     install: |
-      bin.install "jira"
+      system "go", "build", "-o", "jira-cloud-cli", "./main.go"
+      bin.install "jira-cloud-cli"
