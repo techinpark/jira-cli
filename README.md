@@ -28,8 +28,6 @@ go install github.com/techinpark/jira-cli@latest
 
 ### Homebrew
 
-Homebrew support is prepared via GoReleaser. Once a tap is published:
-
 ```bash
 brew tap techinpark/tap
 brew install jira-cli
@@ -136,4 +134,3 @@ go build ./...
 - [CONTRIBUTING.md](./CONTRIBUTING.md)
 - [CHANGELOG.md](./CHANGELOG.md)
 - [LICENSE](./LICENSE)
-
