@@ -21,6 +21,7 @@ brews:
   - repository:
       owner: techinpark
       name: homebrew-tap
+    name: jira-cloud-cli
     homepage: https://github.com/techinpark/jira-cli
     description: Jira CLI for Jira Cloud REST API v3
     install: |

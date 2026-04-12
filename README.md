@@ -30,7 +30,7 @@ go install github.com/techinpark/jira-cli@latest
 
 ```bash
 brew tap techinpark/tap
-brew install jira-cli
+brew install techinpark/tap/jira-cloud-cli
 ```
 
 ## Authentication
