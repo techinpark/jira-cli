@@ -131,6 +131,21 @@ go test ./... -cover
 go build ./...
 ```
 
+## Release Automation
+
+Tag pushes matching `v*` run GoReleaser through GitHub Actions.
+
+Required repository secret:
+
+- `TAP_GITHUB_TOKEN`: a GitHub personal access token with permission to create releases in `techinpark/jira-cli` and push formula updates to `techinpark/homebrew-tap`
+
+Example:
+
+```bash
+git tag v0.1.1
+git push origin v0.1.1
+```
+
 ## Open Source
 
 - [CONTRIBUTING.md](./CONTRIBUTING.md)
