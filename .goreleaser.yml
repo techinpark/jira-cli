@@ -1,0 +1,27 @@
+project_name: jira-cli
+
+before:
+  hooks:
+    - go test ./...
+
+builds:
+  - binary: jira
+    main: ./main.go
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: [tar.gz]
+
+brews:
+  - repository:
+      owner: techinpark
+      name: homebrew-tap
+    homepage: https://github.com/techinpark/jira-cli
+    description: Jira CLI for Jira Cloud REST API v3
+    install: |
+      bin.install "jira"
