@@ -22,6 +22,7 @@ func newAuthCommand() *cobra.Command {
 	cmd.AddCommand(newAuthListCommand())
 	cmd.AddCommand(newAuthUseCommand())
 	cmd.AddCommand(newAuthCheckCommand())
+	cmd.AddCommand(newAuthWhoamiCommand())
 	cmd.AddCommand(newAuthRemoveCommand())
 	return cmd
 }
@@ -219,6 +220,33 @@ func newAuthCheckCommand() *cobra.Command {
 				return writeJSON(cmd, result)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Auth OK for %s (%s)\n", profile.Email, profile.SiteURL)
+			return nil
+		},
+	}
+	return cmd
+}
+
+func newAuthWhoamiCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "whoami",
+		Short:   "Show the authenticated Jira user",
+		PreRunE: validateOutputFlag,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			client, _, err := newJiraClient(context.Background())
+			if err != nil {
+				return err
+			}
+			self, err := client.Myself(context.Background())
+			if err != nil {
+				return err
+			}
+			if outputJSON() {
+				return writeJSON(cmd, self)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s (%s)\n", self.DisplayName, self.AccountID)
+			if self.Email != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\n", self.Email)
+			}
 			return nil
 		},
 	}

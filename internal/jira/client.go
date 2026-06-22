@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -36,12 +37,22 @@ type CreateIssueInput struct {
 	IssueType   string
 	Summary     string
 	Description string
+	Assignee    string // resolved accountId
+	Priority    string
+	Parent      string
+	Due         string
+	Labels      []string
 	Fields      map[string]any
 }
 
 type UpdateIssueInput struct {
 	Summary     string
 	Description *string
+	Assignee    string // resolved accountId
+	Priority    string
+	Parent      string
+	Due         string
+	Labels      []string
 	Fields      map[string]any
 }
 
@@ -144,6 +155,7 @@ func (c *Client) CreateIssue(ctx context.Context, input CreateIssueInput) (Issue
 	if input.Description != "" {
 		fields["description"] = adf.PlainTextDoc(input.Description)
 	}
+	applyIssueFields(fields, input.Assignee, input.Priority, input.Parent, input.Due, input.Labels)
 	for key, value := range input.Fields {
 		fields[key] = value
 	}
@@ -160,6 +172,7 @@ func (c *Client) UpdateIssue(ctx context.Context, key string, input UpdateIssueI
 	if input.Description != nil {
 		fields["description"] = adf.PlainTextDoc(*input.Description)
 	}
+	applyIssueFields(fields, input.Assignee, input.Priority, input.Parent, input.Due, input.Labels)
 	for name, value := range input.Fields {
 		fields[name] = value
 	}
@@ -225,6 +238,114 @@ func (c *Client) AddAttachments(ctx context.Context, issueKey string, paths []st
 		attachments = append(attachments, item.toAttachment())
 	}
 	return attachments, nil
+}
+
+// ListAttachments returns the attachments currently on an issue.
+func (c *Client) ListAttachments(ctx context.Context, issueKey string) ([]Attachment, error) {
+	query := url.Values{}
+	query.Set("fields", "attachment")
+	var out struct {
+		Fields struct {
+			Attachment []attachmentDocument `json:"attachment"`
+		} `json:"fields"`
+	}
+	if err := c.httpClient.Do(ctx, http.MethodGet, "/rest/api/3/issue/"+url.PathEscape(issueKey), query, nil, &out); err != nil {
+		return nil, err
+	}
+	attachments := make([]Attachment, 0, len(out.Fields.Attachment))
+	for _, item := range out.Fields.Attachment {
+		attachments = append(attachments, item.toAttachment())
+	}
+	return attachments, nil
+}
+
+// AttachmentMeta returns metadata for a single attachment by ID.
+func (c *Client) AttachmentMeta(ctx context.Context, attachmentID string) (Attachment, error) {
+	var out attachmentDocument
+	err := c.httpClient.Do(ctx, http.MethodGet, "/rest/api/3/attachment/"+url.PathEscape(attachmentID), nil, nil, &out)
+	return out.toAttachment(), err
+}
+
+// DownloadAttachmentContent streams an attachment's binary content to w. Callers
+// that need the filename should fetch it separately via AttachmentMeta so the
+// metadata is not requested twice.
+func (c *Client) DownloadAttachmentContent(ctx context.Context, attachmentID string, w io.Writer) error {
+	return c.httpClient.Download(ctx, "/rest/api/3/attachment/content/"+url.PathEscape(attachmentID), w)
+}
+
+// DeleteAttachment removes an attachment by ID.
+func (c *Client) DeleteAttachment(ctx context.Context, attachmentID string) error {
+	return c.httpClient.Do(ctx, http.MethodDelete, "/rest/api/3/attachment/"+url.PathEscape(attachmentID), nil, nil, nil)
+}
+
+// Myself returns the authenticated user.
+func (c *Client) Myself(ctx context.Context) (User, error) {
+	var out userDocument
+	err := c.httpClient.Do(ctx, http.MethodGet, "/rest/api/3/myself", nil, nil, &out)
+	return out.toUser(), err
+}
+
+// SearchUsers finds users matching a query (display name or email).
+func (c *Client) SearchUsers(ctx context.Context, query string, limit int) ([]User, error) {
+	q := url.Values{}
+	q.Set("query", query)
+	if limit > 0 {
+		q.Set("maxResults", strconv.Itoa(limit))
+	}
+	var out []userDocument
+	if err := c.httpClient.Do(ctx, http.MethodGet, "/rest/api/3/user/search", q, nil, &out); err != nil {
+		return nil, err
+	}
+	users := make([]User, 0, len(out))
+	for _, item := range out {
+		users = append(users, item.toUser())
+	}
+	return users, nil
+}
+
+// ResolveUserAccountID turns a user reference into a Jira Cloud accountId.
+// "me" (or "@me") resolves to the authenticated user, a value containing "@" is
+// treated as an email and looked up via user search, and anything else is
+// assumed to already be an accountId.
+func (c *Client) ResolveUserAccountID(ctx context.Context, ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	switch {
+	case ref == "":
+		return "", fmt.Errorf("empty user reference")
+	case strings.EqualFold(ref, "me"), strings.EqualFold(ref, "@me"):
+		me, err := c.Myself(ctx)
+		if err != nil {
+			return "", err
+		}
+		return me.AccountID, nil
+	case strings.Contains(ref, "@"):
+		// Jira's user search matches the query against both display name and
+		// email, so a single result is not guaranteed to own this email. Only
+		// accept an exact email match; otherwise the caller must pass an
+		// accountId to avoid silently assigning the wrong person.
+		users, err := c.SearchUsers(ctx, ref, 5)
+		if err != nil {
+			return "", err
+		}
+		for _, u := range users {
+			if strings.EqualFold(u.Email, ref) {
+				return u.AccountID, nil
+			}
+		}
+		return "", fmt.Errorf("no user with email %q found; pass an accountId (try: jira users search --query %q)", ref, ref)
+	default:
+		return ref, nil
+	}
+}
+
+// AssignIssue sets the assignee of an issue. An empty accountID unassigns the
+// issue (sets the field to null).
+func (c *Client) AssignIssue(ctx context.Context, issueKey, accountID string) error {
+	body := map[string]any{"accountId": nil}
+	if accountID != "" {
+		body["accountId"] = accountID
+	}
+	return c.httpClient.Do(ctx, http.MethodPut, "/rest/api/3/issue/"+url.PathEscape(issueKey)+"/assignee", nil, body, nil)
 }
 
 func (c *Client) ListComments(ctx context.Context, issueKey string) ([]Comment, error) {
@@ -460,6 +581,44 @@ func (d worklogDocument) toWorklog() Worklog {
 		Started:   d.Started,
 		TimeSpent: d.TimeSpent,
 		Comment:   strings.TrimSpace(adf.ExtractPlainText(d.Comment)),
+	}
+}
+
+// applyIssueFields maps the convenience inputs shared by create and update onto
+// the Jira fields payload. Empty values are skipped so they never clear a field.
+func applyIssueFields(fields map[string]any, assignee, priority, parent, due string, labels []string) {
+	if assignee != "" {
+		fields["assignee"] = map[string]any{"accountId": assignee}
+	}
+	if priority != "" {
+		fields["priority"] = refByNameOrID(priority, "name")
+	}
+	if parent != "" {
+		fields["parent"] = refByNameOrID(parent, "key")
+	}
+	if due != "" {
+		fields["duedate"] = due
+	}
+	if len(labels) > 0 {
+		fields["labels"] = labels
+	}
+}
+
+type userDocument struct {
+	AccountID   string `json:"accountId"`
+	DisplayName string `json:"displayName"`
+	Email       string `json:"emailAddress"`
+	Active      bool   `json:"active"`
+	AccountType string `json:"accountType"`
+}
+
+func (d userDocument) toUser() User {
+	return User{
+		AccountID:   d.AccountID,
+		DisplayName: d.DisplayName,
+		Email:       d.Email,
+		Active:      d.Active,
+		AccountType: d.AccountType,
 	}
 }
 

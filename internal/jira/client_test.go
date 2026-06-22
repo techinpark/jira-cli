@@ -3,6 +3,7 @@ package jira
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -275,6 +276,108 @@ func TestAddAttachments(t *testing.T) {
 	}
 	if _, err := client.AddAttachments(context.Background(), "ENG-1", tooMany); err == nil {
 		t.Fatal("expected error when exceeding the 60-file limit")
+	}
+}
+
+func TestUserAndAttachmentDataLayer(t *testing.T) {
+	var assigneeBody string
+	var createBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/rest/api/3/myself":
+			_, _ = w.Write([]byte(`{"accountId":"me-123","displayName":"Me","emailAddress":"me@example.com","active":true,"accountType":"atlassian"}`))
+		case r.URL.Path == "/rest/api/3/user/search":
+			if r.URL.Query().Get("query") == "alice@example.com" {
+				_, _ = w.Write([]byte(`[{"accountId":"a-1","displayName":"Alice","emailAddress":"alice@example.com","active":true}]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[]`))
+		case r.URL.Path == "/rest/api/3/issue/ENG-1/assignee" && r.Method == http.MethodPut:
+			b, _ := io.ReadAll(r.Body)
+			assigneeBody = string(b)
+			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/rest/api/3/issue" && r.Method == http.MethodPost:
+			_ = json.NewDecoder(r.Body).Decode(&createBody)
+			_, _ = w.Write([]byte(`{"id":"2","key":"ENG-2"}`))
+		case r.URL.Path == "/rest/api/3/issue/ENG-1" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"id":"1","key":"ENG-1","fields":{"attachment":[{"id":"99","filename":"note.txt","size":4,"mimeType":"text/plain"}]}}`))
+		case r.URL.Path == "/rest/api/3/attachment/99" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"id":"99","filename":"note.txt","size":4,"mimeType":"text/plain"}`))
+		case r.URL.Path == "/rest/api/3/attachment/content/99" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`file`))
+		case r.URL.Path == "/rest/api/3/attachment/99" && r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	ctx := context.Background()
+
+	me, err := client.Myself(ctx)
+	if err != nil || me.AccountID != "me-123" || me.Email != "me@example.com" {
+		t.Fatalf("unexpected myself: %+v err=%v", me, err)
+	}
+
+	// ResolveUserAccountID: me / email / raw accountId.
+	if id, err := client.ResolveUserAccountID(ctx, "me"); err != nil || id != "me-123" {
+		t.Fatalf("resolve me: %q err=%v", id, err)
+	}
+	if id, err := client.ResolveUserAccountID(ctx, "alice@example.com"); err != nil || id != "a-1" {
+		t.Fatalf("resolve email: %q err=%v", id, err)
+	}
+	if id, err := client.ResolveUserAccountID(ctx, "raw-account-id"); err != nil || id != "raw-account-id" {
+		t.Fatalf("resolve raw: %q err=%v", id, err)
+	}
+	if _, err := client.ResolveUserAccountID(ctx, "ghost@example.com"); err == nil {
+		t.Fatal("expected error for unknown email")
+	}
+
+	// AssignIssue: set then unassign.
+	if err := client.AssignIssue(ctx, "ENG-1", "a-1"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(assigneeBody, `"accountId":"a-1"`) {
+		t.Fatalf("unexpected assignee body: %s", assigneeBody)
+	}
+	if err := client.AssignIssue(ctx, "ENG-1", ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(assigneeBody, `"accountId":null`) {
+		t.Fatalf("expected null assignee on unassign: %s", assigneeBody)
+	}
+
+	// Attachment lifecycle.
+	atts, err := client.ListAttachments(ctx, "ENG-1")
+	if err != nil || len(atts) != 1 || atts[0].ID != "99" || atts[0].Filename != "note.txt" {
+		t.Fatalf("unexpected attachments: %+v err=%v", atts, err)
+	}
+	var buf strings.Builder
+	if err := client.DownloadAttachmentContent(ctx, "99", &buf); err != nil || buf.String() != "file" {
+		t.Fatalf("unexpected download: body=%q err=%v", buf.String(), err)
+	}
+	if err := client.DeleteAttachment(ctx, "99"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Convenience fields flow through create.
+	if _, err := client.CreateIssue(ctx, CreateIssueInput{
+		Project: "ENG", IssueType: "Bug", Summary: "x",
+		Assignee: "a-1", Priority: "High", Parent: "ENG-1", Due: "2026-07-01", Labels: []string{"a", "b"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cf := createBody["fields"].(map[string]any)
+	if cf["assignee"].(map[string]any)["accountId"] != "a-1" {
+		t.Fatalf("missing assignee in create: %+v", cf)
+	}
+	if cf["priority"].(map[string]any)["name"] != "High" || cf["parent"].(map[string]any)["key"] != "ENG-1" || cf["duedate"] != "2026-07-01" {
+		t.Fatalf("unexpected convenience fields: %+v", cf)
+	}
+	if labels, ok := cf["labels"].([]any); !ok || len(labels) != 2 {
+		t.Fatalf("unexpected labels: %+v", cf["labels"])
 	}
 }
 

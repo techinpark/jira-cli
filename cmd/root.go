@@ -52,6 +52,8 @@ func init() {
 	rootCmd.AddCommand(newCommentsCommand())
 	rootCmd.AddCommand(newTransitionsCommand())
 	rootCmd.AddCommand(newWorklogsCommand())
+	rootCmd.AddCommand(newUsersCommand())
+	rootCmd.AddCommand(newAttachmentsCommand())
 	rootCmd.AddCommand(newRawCommand())
 }
 

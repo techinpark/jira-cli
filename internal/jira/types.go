@@ -65,3 +65,11 @@ type Attachment struct {
 	MimeType string `json:"mime_type,omitempty"`
 	Content  string `json:"content,omitempty"`
 }
+
+type User struct {
+	AccountID   string `json:"account_id"`
+	DisplayName string `json:"display_name,omitempty"`
+	Email       string `json:"email,omitempty"`
+	Active      bool   `json:"active"`
+	AccountType string `json:"account_type,omitempty"`
+}
