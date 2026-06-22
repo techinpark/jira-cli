@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -203,6 +205,76 @@ func TestParseHelpers(t *testing.T) {
 	}
 	if got := strings.TrimSpace(comment.toComment().Body); got != "hi" {
 		t.Fatalf("unexpected extracted comment: %q", got)
+	}
+}
+
+func TestAddAttachments(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "note.txt")
+	second := filepath.Join(dir, "screenshot.png")
+	if err := os.WriteFile(first, []byte("log output"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(second, []byte("not really a png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotFilenames []string
+	var gotMimeTypes []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/issue/ENG-1/attachments" || r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("X-Atlassian-Token") != "no-check" {
+			t.Fatalf("missing XSRF bypass header")
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		for _, fh := range r.MultipartForm.File["file"] {
+			gotFilenames = append(gotFilenames, fh.Filename)
+			gotMimeTypes = append(gotMimeTypes, fh.Header.Get("Content-Type"))
+		}
+		_, _ = w.Write([]byte(`[{"id":"99","filename":"note.txt","author":{"displayName":"Alice"},"created":"2026-04-13T09:00:00.000+0900","size":10,"mimeType":"text/plain","content":"https://jira/rest/api/3/attachment/content/99"},{"id":"100","filename":"screenshot.png","size":16,"mimeType":"image/png"}]`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+
+	attachments, err := client.AddAttachments(context.Background(), "ENG-1", []string{first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attachments) != 2 {
+		t.Fatalf("expected 2 attachments, got %d", len(attachments))
+	}
+	if attachments[0].ID != "99" || attachments[0].Filename != "note.txt" || attachments[0].Author != "Alice" || attachments[0].Size != 10 || attachments[0].MimeType != "text/plain" {
+		t.Fatalf("unexpected first attachment: %+v", attachments[0])
+	}
+	if len(gotFilenames) != 2 || gotFilenames[0] != "note.txt" || gotFilenames[1] != "screenshot.png" {
+		t.Fatalf("unexpected uploaded filenames: %+v", gotFilenames)
+	}
+	if len(gotMimeTypes) != 2 || !strings.HasPrefix(gotMimeTypes[0], "text/plain") || gotMimeTypes[1] != "image/png" {
+		t.Fatalf("unexpected part content types: %+v", gotMimeTypes)
+	}
+
+	if _, err := client.AddAttachments(context.Background(), "ENG-1", nil); err == nil {
+		t.Fatal("expected error for empty attachment list")
+	}
+	if _, err := client.AddAttachments(context.Background(), "ENG-1", []string{filepath.Join(dir, "missing.txt")}); err == nil {
+		t.Fatal("expected error for missing file")
+	}
+	if _, err := client.AddAttachments(context.Background(), "ENG-1", []string{dir}); err == nil {
+		t.Fatal("expected error for directory path")
+	}
+
+	tooMany := make([]string, 61)
+	for i := range tooMany {
+		tooMany[i] = first
+	}
+	if _, err := client.AddAttachments(context.Background(), "ENG-1", tooMany); err == nil {
+		t.Fatal("expected error when exceeding the 60-file limit")
 	}
 }
 

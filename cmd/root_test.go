@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -76,6 +77,79 @@ func TestAuthInitPromptAndErrors(t *testing.T) {
 	}
 	if _, err := executeRoot(t, nil, "raw", "GET", "/rest/api/3/custom", "--query", "broken"); err == nil {
 		t.Fatal("expected raw query error")
+	}
+}
+
+func TestIssuesAttachCommands(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	server := newCommandMockServer()
+	defer server.Close()
+
+	if _, err := executeRoot(t, nil, "auth", "init", "--profile", "work", "--site-url", server.URL, "--email", "user@example.com", "--api-token", "token", "--default-project", "ENG", "--json"); err != nil {
+		t.Fatal(err)
+	}
+
+	file := filepath.Join(tmp, "note.txt")
+	if err := os.WriteFile(file, []byte("logs"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := executeRoot(t, nil, "issues", "attach", "ENG-1", "--profile", "work", "--file", file)
+	if err != nil {
+		t.Fatalf("attach failed: out=%s err=%v", out, err)
+	}
+	if !strings.Contains(out, `"key": "ENG-1"`) || !strings.Contains(out, `"filename": "note.txt"`) {
+		t.Fatalf("unexpected attach output: %s", out)
+	}
+
+	out, err = executeRoot(t, nil, "issues", "create", "--profile", "work", "--type", "Bug", "--summary", "New issue", "--attach", file, "--json")
+	if err != nil {
+		t.Fatalf("create --attach failed: out=%s err=%v", out, err)
+	}
+	if !strings.Contains(out, `"key": "ENG-2"`) || !strings.Contains(out, `"attachments"`) {
+		t.Fatalf("unexpected create output: %s", out)
+	}
+
+	if _, err := executeRoot(t, nil, "issues", "create", "--profile", "work", "--type", "Bug", "--summary", "New issue", "--attach", filepath.Join(tmp, "missing.txt"), "--json"); err == nil {
+		t.Fatal("expected error when attaching a missing file")
+	}
+}
+
+func TestIssuesCreateAttachPartialFailure(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/rest/api/3/myself":
+			_, _ = w.Write([]byte(`{"accountId":"abc","displayName":"User"}`))
+		case r.URL.Path == "/rest/api/3/issue" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"id":"2","key":"ENG-2","self":"https://jira/rest/api/3/issue/2"}`))
+		case r.URL.Path == "/rest/api/3/issue/ENG-2/attachments" && r.Method == http.MethodPost:
+			http.Error(w, `{"errorMessages":["The file is too large"]}`, http.StatusRequestEntityTooLarge)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	if _, err := executeRoot(t, nil, "auth", "init", "--profile", "work", "--site-url", server.URL, "--email", "user@example.com", "--api-token", "token", "--default-project", "ENG", "--json"); err != nil {
+		t.Fatal(err)
+	}
+
+	file := filepath.Join(tmp, "big.bin")
+	if err := os.WriteFile(file, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := executeRoot(t, nil, "issues", "create", "--profile", "work", "--type", "Bug", "--summary", "New issue", "--attach", file, "--json")
+	if err == nil {
+		t.Fatal("expected error when attachment upload fails after issue creation")
+	}
+	// The issue was created server-side, so its key must still be recoverable
+	// from the structured output for an automated retry of `issues attach`.
+	if !strings.Contains(out, `"key": "ENG-2"`) {
+		t.Fatalf("expected created issue key in structured output, got: %s", out)
 	}
 }
 
@@ -159,6 +233,8 @@ func newCommandMockServer() *httptest.Server {
 			_, _ = w.Write([]byte(`{"id":"21","started":"2026-04-13T09:00:00.000+0900","timeSpent":"2h","author":{"displayName":"Alice"},"comment":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"updated"}]}]}}`))
 		case r.URL.Path == "/rest/api/3/issue/ENG-1/worklog/21" && r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/attachments") && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`[{"id":"99","filename":"note.txt","author":{"displayName":"Alice"},"created":"2026-04-13T09:00:00.000+0900","size":4,"mimeType":"text/plain","content":"https://jira/rest/api/3/attachment/content/99"}]`))
 		case r.URL.Path == "/rest/api/3/custom":
 			_, _ = w.Write([]byte(`{"ok":true}`))
 		default:

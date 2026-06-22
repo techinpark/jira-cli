@@ -55,3 +55,13 @@ type Worklog struct {
 	TimeSpent string `json:"time_spent,omitempty"`
 	Comment   string `json:"comment,omitempty"`
 }
+
+type Attachment struct {
+	ID       string `json:"id"`
+	Filename string `json:"filename"`
+	Author   string `json:"author,omitempty"`
+	Created  string `json:"created,omitempty"`
+	Size     int64  `json:"size,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
+	Content  string `json:"content,omitempty"`
+}

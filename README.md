@@ -93,6 +93,36 @@ jira issues create \
   --field labels='["release","docs"]'
 ```
 
+## Attachments
+
+Jira Cloud cannot embed file attachments in the create-issue call, so `jira-cli`
+creates the issue first and then uploads attachments to it. Use `--attach`
+(repeatable) on `issues create` to do both in one command:
+
+```bash
+jira issues create \
+  --project ENG \
+  --type Bug \
+  --summary 'Crash on launch' \
+  --attach ./crash.log \
+  --attach ./screenshot.png
+```
+
+Attach files to an existing issue with `issues attach`:
+
+```bash
+jira issues attach ENG-123 --file ./crash.log --file ./screenshot.png
+```
+
+Both commands return the uploaded attachment metadata as JSON. Jira allows at
+most 60 files per request and enforces the site's configured maximum attachment
+size.
+
+Because Jira creates the issue before attachments are uploaded, `issues create
+--attach` can partially succeed: if an upload fails, the command still prints the
+created issue (with its `key`) as JSON and then exits non-zero, so you can retry
+with `jira issues attach <key> --file ...`.
+
 ## Raw API Calls
 
 Use `raw` when the direct command set does not cover an endpoint yet.
