@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"strings"
 	"time"
@@ -119,6 +121,91 @@ func (c *Client) doOnce(ctx context.Context, method, target string, bodyBytes []
 	}
 	defer resp.Body.Close()
 
+	return handleResponse(resp, out)
+}
+
+// FilePart describes a single file to send as part of a multipart/form-data
+// request, such as a Jira issue attachment upload. ContentType is optional; when
+// empty the multipart writer defaults the part to application/octet-stream.
+type FilePart struct {
+	FieldName   string
+	FileName    string
+	ContentType string
+	Reader      io.Reader
+}
+
+// Upload sends a multipart/form-data request. It is used by endpoints such as
+// the Jira attachment upload that reject JSON bodies and require the XSRF-bypass
+// header. The body is streamed from the part readers via an io.Pipe so memory
+// stays bounded regardless of file count or size. The request is not retried:
+// the streamed body can only be read once and uploads are not idempotent.
+func (c *Client) Upload(ctx context.Context, method, path string, parts []FilePart, out any) error {
+	target := path
+	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+		target = c.profile.SiteURL + path
+	}
+
+	pr, pw := io.Pipe()
+	writer := multipart.NewWriter(pw)
+	// FormDataContentType embeds the boundary, which is fixed at NewWriter time;
+	// capture it before the writer goroutine starts to keep this race-free.
+	contentType := writer.FormDataContentType()
+
+	go func() {
+		for _, part := range parts {
+			field, err := createFilePart(writer, part)
+			if err != nil {
+				_ = pw.CloseWithError(err)
+				return
+			}
+			if _, err := io.Copy(field, part.Reader); err != nil {
+				_ = pw.CloseWithError(fmt.Errorf("read attachment %q: %w", part.FileName, err))
+				return
+			}
+		}
+		if err := writer.Close(); err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		_ = pw.Close()
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, method, target, pr)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", auth.BasicAuthHeader(c.profile))
+	req.Header.Set("Content-Type", contentType)
+	// Jira rejects multipart uploads unless XSRF checking is explicitly bypassed.
+	req.Header.Set("X-Atlassian-Token", "no-check")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return handleResponse(resp, out)
+}
+
+// mimeQuoteEscaper mirrors the escaping used by mime/multipart's CreateFormFile:
+// only backslashes and double quotes are escaped, so UTF-8 filenames (e.g. with
+// Korean characters) are preserved rather than \u-escaped as fmt %q would do.
+var mimeQuoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
+
+func createFilePart(writer *multipart.Writer, part FilePart) (io.Writer, error) {
+	if part.ContentType == "" {
+		return writer.CreateFormFile(part.FieldName, part.FileName)
+	}
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`,
+		mimeQuoteEscaper.Replace(part.FieldName), mimeQuoteEscaper.Replace(part.FileName)))
+	header.Set("Content-Type", part.ContentType)
+	return writer.CreatePart(header)
+}
+
+func handleResponse(resp *http.Response, out any) error {
 	payload, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
@@ -134,7 +221,6 @@ func (c *Client) doOnce(ctx context.Context, method, target string, bodyBytes []
 	}
 	if textOut, ok := out.(*string); ok {
 		*textOut = string(payload)
-		return nil
 	}
 	return nil
 }

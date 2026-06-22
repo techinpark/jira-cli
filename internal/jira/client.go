@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mime"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -169,6 +172,59 @@ func (c *Client) DeleteIssue(ctx context.Context, key string, deleteSubtasks boo
 		query.Set("deleteSubtasks", "true")
 	}
 	return c.httpClient.Do(ctx, http.MethodDelete, "/rest/api/3/issue/"+url.PathEscape(key), query, nil, nil)
+}
+
+// AddAttachments uploads one or more local files to an issue. Jira has no way to
+// embed attachments when an issue is created, so callers create the issue first
+// and then attach files to the returned key.
+func (c *Client) AddAttachments(ctx context.Context, issueKey string, paths []string) ([]Attachment, error) {
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("no attachment files provided")
+	}
+	if len(paths) > 60 {
+		return nil, fmt.Errorf("too many attachments: %d files requested, Jira allows at most 60 per request", len(paths))
+	}
+
+	parts := make([]httpx.FilePart, 0, len(paths))
+	files := make([]*os.File, 0, len(paths))
+	defer func() {
+		for _, f := range files {
+			_ = f.Close()
+		}
+	}()
+
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("attachment %q: %w", path, err)
+		}
+		if info.IsDir() {
+			return nil, fmt.Errorf("attachment %q is a directory", path)
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("attachment %q: %w", path, err)
+		}
+		files = append(files, f)
+		base := filepath.Base(path)
+		parts = append(parts, httpx.FilePart{
+			FieldName:   "file",
+			FileName:    base,
+			ContentType: mime.TypeByExtension(filepath.Ext(base)),
+			Reader:      f,
+		})
+	}
+
+	var out []attachmentDocument
+	if err := c.httpClient.Upload(ctx, http.MethodPost, "/rest/api/3/issue/"+url.PathEscape(issueKey)+"/attachments", parts, &out); err != nil {
+		return nil, err
+	}
+
+	attachments := make([]Attachment, 0, len(out))
+	for _, item := range out {
+		attachments = append(attachments, item.toAttachment())
+	}
+	return attachments, nil
 }
 
 func (c *Client) ListComments(ctx context.Context, issueKey string) ([]Comment, error) {
@@ -404,6 +460,30 @@ func (d worklogDocument) toWorklog() Worklog {
 		Started:   d.Started,
 		TimeSpent: d.TimeSpent,
 		Comment:   strings.TrimSpace(adf.ExtractPlainText(d.Comment)),
+	}
+}
+
+type attachmentDocument struct {
+	ID       string `json:"id"`
+	Filename string `json:"filename"`
+	Author   struct {
+		DisplayName string `json:"displayName"`
+	} `json:"author"`
+	Created  string `json:"created"`
+	Size     int64  `json:"size"`
+	MimeType string `json:"mimeType"`
+	Content  string `json:"content"`
+}
+
+func (d attachmentDocument) toAttachment() Attachment {
+	return Attachment{
+		ID:       d.ID,
+		Filename: d.Filename,
+		Author:   d.Author.DisplayName,
+		Created:  d.Created,
+		Size:     d.Size,
+		MimeType: d.MimeType,
+		Content:  d.Content,
 	}
 }
 
