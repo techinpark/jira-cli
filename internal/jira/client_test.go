@@ -355,9 +355,8 @@ func TestUserAndAttachmentDataLayer(t *testing.T) {
 		t.Fatalf("unexpected attachments: %+v err=%v", atts, err)
 	}
 	var buf strings.Builder
-	name, err := client.DownloadAttachment(ctx, "99", &buf)
-	if err != nil || name != "note.txt" || buf.String() != "file" {
-		t.Fatalf("unexpected download: name=%q body=%q err=%v", name, buf.String(), err)
+	if err := client.DownloadAttachmentContent(ctx, "99", &buf); err != nil || buf.String() != "file" {
+		t.Fatalf("unexpected download: body=%q err=%v", buf.String(), err)
 	}
 	if err := client.DeleteAttachment(ctx, "99"); err != nil {
 		t.Fatal(err)

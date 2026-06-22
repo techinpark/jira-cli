@@ -2,8 +2,11 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/techinpark/jira-cli/internal/output"
@@ -50,44 +53,57 @@ func newAttachmentsListCommand() *cobra.Command {
 }
 
 func newAttachmentsDownloadCommand() *cobra.Command {
-	var outputPath string
+	var outPath string
 	cmd := &cobra.Command{
 		Use:     "download <attachment-id>",
 		Short:   "Download an attachment",
 		Args:    cobra.ExactArgs(1),
 		PreRunE: validateOutputFlag,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, _, err := newJiraClient(context.Background())
+			ctx := context.Background()
+			client, _, err := newJiraClient(ctx)
 			if err != nil {
 				return err
 			}
 
-			path := outputPath
+			path := outPath
 			if path == "" {
-				meta, err := client.AttachmentMeta(context.Background(), args[0])
+				meta, err := client.AttachmentMeta(ctx, args[0])
 				if err != nil {
 					return err
 				}
-				path = meta.Filename
+				// Filename comes from the server; never let it escape the cwd.
+				name := filepath.Base(meta.Filename)
+				if name == "." || name == ".." || name == string(os.PathSeparator) || strings.TrimSpace(name) == "" {
+					return fmt.Errorf("attachment has an unsafe filename %q; pass --out to choose a destination", meta.Filename)
+				}
+				path = name
 			}
 
-			file, err := os.Create(path)
+			// Download atomically: stream into a temp file in the destination
+			// directory and rename on success, so a failed download never
+			// clobbers an existing file or leaves a truncated one behind.
+			tmp, err := os.CreateTemp(filepath.Dir(path), ".jira-download-*")
 			if err != nil {
 				return err
 			}
-			defer file.Close()
+			tmpName := tmp.Name()
+			defer os.Remove(tmpName)
 
-			filename, err := client.DownloadAttachment(context.Background(), args[0], file)
-			if err != nil {
+			if err := client.DownloadAttachmentContent(ctx, args[0], tmp); err != nil {
+				tmp.Close()
 				return err
 			}
-			if err := file.Close(); err != nil {
+			if err := tmp.Close(); err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{"id": args[0], "filename": filename, "path": path})
+			if err := os.Rename(tmpName, path); err != nil {
+				return err
+			}
+			return writeJSON(cmd, map[string]any{"id": args[0], "filename": filepath.Base(path), "path": path})
 		},
 	}
-	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "Destination file path (defaults to the attachment filename)")
+	cmd.Flags().StringVarP(&outPath, "out", "o", "", "Destination file path (defaults to the attachment filename)")
 	return cmd
 }
 

@@ -266,17 +266,11 @@ func (c *Client) AttachmentMeta(ctx context.Context, attachmentID string) (Attac
 	return out.toAttachment(), err
 }
 
-// DownloadAttachment streams an attachment's binary content to w and returns the
-// attachment's filename, looked up from its metadata.
-func (c *Client) DownloadAttachment(ctx context.Context, attachmentID string, w io.Writer) (string, error) {
-	meta, err := c.AttachmentMeta(ctx, attachmentID)
-	if err != nil {
-		return "", err
-	}
-	if err := c.httpClient.Download(ctx, "/rest/api/3/attachment/content/"+url.PathEscape(attachmentID), w); err != nil {
-		return "", err
-	}
-	return meta.Filename, nil
+// DownloadAttachmentContent streams an attachment's binary content to w. Callers
+// that need the filename should fetch it separately via AttachmentMeta so the
+// metadata is not requested twice.
+func (c *Client) DownloadAttachmentContent(ctx context.Context, attachmentID string, w io.Writer) error {
+	return c.httpClient.Download(ctx, "/rest/api/3/attachment/content/"+url.PathEscape(attachmentID), w)
 }
 
 // DeleteAttachment removes an attachment by ID.
@@ -318,14 +312,18 @@ func (c *Client) ResolveUserAccountID(ctx context.Context, ref string) (string, 
 	switch {
 	case ref == "":
 		return "", fmt.Errorf("empty user reference")
-	case ref == "me" || ref == "@me":
+	case strings.EqualFold(ref, "me"), strings.EqualFold(ref, "@me"):
 		me, err := c.Myself(ctx)
 		if err != nil {
 			return "", err
 		}
 		return me.AccountID, nil
 	case strings.Contains(ref, "@"):
-		users, err := c.SearchUsers(ctx, ref, 2)
+		// Jira's user search matches the query against both display name and
+		// email, so a single result is not guaranteed to own this email. Only
+		// accept an exact email match; otherwise the caller must pass an
+		// accountId to avoid silently assigning the wrong person.
+		users, err := c.SearchUsers(ctx, ref, 5)
 		if err != nil {
 			return "", err
 		}
@@ -334,14 +332,7 @@ func (c *Client) ResolveUserAccountID(ctx context.Context, ref string) (string, 
 				return u.AccountID, nil
 			}
 		}
-		switch len(users) {
-		case 0:
-			return "", fmt.Errorf("no user found for %q", ref)
-		case 1:
-			return users[0].AccountID, nil
-		default:
-			return "", fmt.Errorf("multiple users match %q; specify an accountId", ref)
-		}
+		return "", fmt.Errorf("no user with email %q found; pass an accountId (try: jira users search --query %q)", ref, ref)
 	default:
 		return ref, nil
 	}

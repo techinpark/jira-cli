@@ -40,8 +40,20 @@ func TestAttachmentsCommands(t *testing.T) {
 		t.Fatalf("unexpected list output: out=%s err=%v", out, err)
 	}
 
+	// Default destination (no --out) derives a safe filename from metadata into
+	// the current directory. Run this before any --out download so the reused
+	// cobra command's flag state is still empty.
+	t.Chdir(tmp)
+	out, err = executeRoot(t, nil, "attachments", "download", "99", "--profile", "work", "--json")
+	if err != nil || !strings.Contains(out, `"filename": "note.txt"`) {
+		t.Fatalf("default-name download failed: out=%s err=%v", out, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(tmp, "note.txt")); err != nil || string(data) != "data" {
+		t.Fatalf("default download contents: %q err=%v", string(data), err)
+	}
+
 	dest := filepath.Join(tmp, "out.txt")
-	out, err = executeRoot(t, nil, "attachments", "download", "99", "--profile", "work", "--output", dest, "--json")
+	out, err = executeRoot(t, nil, "attachments", "download", "99", "--profile", "work", "--out", dest, "--json")
 	if err != nil {
 		t.Fatalf("download failed: out=%s err=%v", out, err)
 	}

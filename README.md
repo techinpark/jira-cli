@@ -134,7 +134,7 @@ List, download, and delete attachments:
 
 ```bash
 jira attachments list ENG-123
-jira attachments download 10042 --output ./crash.log
+jira attachments download 10042 --out ./crash.log
 jira attachments delete 10042
 ```
 

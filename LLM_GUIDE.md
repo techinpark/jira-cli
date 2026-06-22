@@ -35,7 +35,7 @@
 
 ## Attachments
 
-- Manage the full lifecycle: `attachments list <key>`, `attachments download <id> [--output path]`, `attachments delete <id>`
+- Manage the full lifecycle: `attachments list <key>`, `attachments download <id> [--out path]`, `attachments delete <id>`
 - Attachments require a local file path; Jira cannot embed them in the create-issue payload
 - `jira issues create --attach <path>` creates the issue, then uploads the file(s)
 - `jira issues attach <issue-key> --file <path>` uploads to an existing issue
