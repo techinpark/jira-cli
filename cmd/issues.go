@@ -20,6 +20,7 @@ func newIssuesCommand() *cobra.Command {
 	cmd.AddCommand(newIssuesUpdateCommand())
 	cmd.AddCommand(newIssuesDeleteCommand())
 	cmd.AddCommand(newIssuesAttachCommand())
+	cmd.AddCommand(newIssuesAssignCommand())
 	return cmd
 }
 
@@ -99,6 +100,11 @@ func newIssuesCreateCommand() *cobra.Command {
 	var description string
 	var fields []string
 	var attachments []string
+	var assignee string
+	var labels []string
+	var priority string
+	var parent string
+	var due string
 
 	cmd := &cobra.Command{
 		Use:     "create",
@@ -117,11 +123,23 @@ func newIssuesCreateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			var assigneeID string
+			if assignee != "" {
+				assigneeID, err = client.ResolveUserAccountID(context.Background(), assignee)
+				if err != nil {
+					return err
+				}
+			}
 			issue, err := client.CreateIssue(context.Background(), jira.CreateIssueInput{
 				Project:     project,
 				IssueType:   issueType,
 				Summary:     summary,
 				Description: description,
+				Assignee:    assigneeID,
+				Priority:    priority,
+				Parent:      parent,
+				Due:         due,
+				Labels:      labels,
 				Fields:      extraFields,
 			})
 			if err != nil {
@@ -148,6 +166,11 @@ func newIssuesCreateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&description, "description", "", "Plain-text issue description")
 	cmd.Flags().StringArrayVar(&fields, "field", nil, "Additional field in key=value form; JSON values are allowed")
 	cmd.Flags().StringArrayVar(&attachments, "attach", nil, "Path to a file to attach after creation (repeatable)")
+	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee reference: me, an email, or an accountId")
+	cmd.Flags().StringSliceVar(&labels, "labels", nil, "Labels to set (comma-separated)")
+	cmd.Flags().StringVar(&priority, "priority", "", "Priority name or ID")
+	cmd.Flags().StringVar(&parent, "parent", "", "Parent issue key or ID")
+	cmd.Flags().StringVar(&due, "due", "", "Due date (YYYY-MM-DD)")
 	_ = cmd.MarkFlagRequired("type")
 	_ = cmd.MarkFlagRequired("summary")
 	return cmd
@@ -158,6 +181,11 @@ func newIssuesUpdateCommand() *cobra.Command {
 	var description string
 	var setDescription bool
 	var fields []string
+	var assignee string
+	var labels []string
+	var priority string
+	var parent string
+	var due string
 
 	cmd := &cobra.Command{
 		Use:     "update <issue-key>",
@@ -180,9 +208,21 @@ func newIssuesUpdateCommand() *cobra.Command {
 			if setDescription {
 				descPtr = &description
 			}
+			var assigneeID string
+			if assignee != "" {
+				assigneeID, err = client.ResolveUserAccountID(context.Background(), assignee)
+				if err != nil {
+					return err
+				}
+			}
 			if err := client.UpdateIssue(context.Background(), args[0], jira.UpdateIssueInput{
 				Summary:     summary,
 				Description: descPtr,
+				Assignee:    assigneeID,
+				Priority:    priority,
+				Parent:      parent,
+				Due:         due,
+				Labels:      labels,
 				Fields:      extraFields,
 			}); err != nil {
 				return err
@@ -193,6 +233,11 @@ func newIssuesUpdateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&summary, "summary", "", "Updated issue summary")
 	cmd.Flags().StringVar(&description, "description", "", "Updated plain-text issue description")
 	cmd.Flags().StringArrayVar(&fields, "field", nil, "Additional field in key=value form; JSON values are allowed")
+	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee reference: me, an email, or an accountId")
+	cmd.Flags().StringSliceVar(&labels, "labels", nil, "Labels to set (comma-separated)")
+	cmd.Flags().StringVar(&priority, "priority", "", "Priority name or ID")
+	cmd.Flags().StringVar(&parent, "parent", "", "Parent issue key or ID")
+	cmd.Flags().StringVar(&due, "due", "", "Due date (YYYY-MM-DD)")
 	return cmd
 }
 
@@ -241,5 +286,46 @@ func newIssuesAttachCommand() *cobra.Command {
 	}
 	cmd.Flags().StringArrayVar(&files, "file", nil, "Path to a file to attach (repeatable)")
 	_ = cmd.MarkFlagRequired("file")
+	return cmd
+}
+
+func newIssuesAssignCommand() *cobra.Command {
+	var assignee string
+	var unassign bool
+
+	cmd := &cobra.Command{
+		Use:     "assign <issue-key>",
+		Short:   "Assign or unassign a Jira issue",
+		Args:    cobra.ExactArgs(1),
+		PreRunE: validateOutputFlag,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			wantAssign := cmd.Flags().Changed("assignee")
+			wantUnassign := cmd.Flags().Changed("unassign")
+			if wantAssign == wantUnassign {
+				return fmt.Errorf("specify exactly one of --assignee or --unassign")
+			}
+			client, _, err := newJiraClient(context.Background())
+			if err != nil {
+				return err
+			}
+			key := args[0]
+			if wantUnassign {
+				if err := client.AssignIssue(context.Background(), key, ""); err != nil {
+					return err
+				}
+				return writeJSON(cmd, map[string]any{"key": key, "assignee": nil, "unassigned": true})
+			}
+			accountID, err := client.ResolveUserAccountID(context.Background(), assignee)
+			if err != nil {
+				return err
+			}
+			if err := client.AssignIssue(context.Background(), key, accountID); err != nil {
+				return err
+			}
+			return writeJSON(cmd, map[string]any{"key": key, "assignee": accountID, "unassigned": false})
+		},
+	}
+	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee reference: me, an email, or an accountId")
+	cmd.Flags().BoolVar(&unassign, "unassign", false, "Remove the current assignee")
 	return cmd
 }
