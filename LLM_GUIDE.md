@@ -15,6 +15,8 @@
 - `jira comments`
 - `jira transitions`
 - `jira worklogs`
+- `jira users`
+- `jira attachments`
 - `jira raw`
 
 ## Safe automation rules
@@ -24,8 +26,16 @@
 - Avoid free-form mutation guesses for Jira custom fields
 - Use JSON field values when a field expects structured data
 
+## Users and assignment
+
+- Jira Cloud identifies users by `accountId`, not email — resolve one with `jira users search --query <email>` or `jira auth whoami` for the current user
+- `--assignee`, `--reporter`, and `jira issues assign` accept `me`, an email, or an `accountId`; email and `me` are resolved automatically
+- `jira issues assign <key> --assignee <ref>` or `--unassign`
+- `jira issues create`/`update` accept convenience flags: `--assignee`, `--labels a,b`, `--priority`, `--parent`, `--due YYYY-MM-DD` (an explicit `--field` still wins)
+
 ## Attachments
 
+- Manage the full lifecycle: `attachments list <key>`, `attachments download <id> [--output path]`, `attachments delete <id>`
 - Attachments require a local file path; Jira cannot embed them in the create-issue payload
 - `jira issues create --attach <path>` creates the issue, then uploads the file(s)
 - `jira issues attach <issue-key> --file <path>` uploads to an existing issue

@@ -78,9 +78,25 @@ jira projects list --profile work
 jira issues get ENG-123
 jira issues search --jql 'project = ENG AND status != Done' --json
 jira issues create --project ENG --type Bug --summary 'Crash on launch'
+jira issues assign ENG-123 --assignee me
 jira comments add ENG-123 --body 'Investigating now'
 jira transitions move ENG-123 --transition Done --comment 'Fixed in latest build'
 jira worklogs add ENG-123 --time-spent '1h 30m' --comment 'Root cause analysis'
+jira users search --query 'jane@example.com'
+jira auth whoami
+```
+
+### Assignees and convenience fields
+
+User references accept `me`, an email, or an `accountId` (Jira Cloud requires an
+`accountId`, which `jira-cli` resolves for you via `users search`):
+
+```bash
+jira issues assign ENG-123 --assignee jane@example.com
+jira issues assign ENG-123 --unassign
+jira issues create --project ENG --type Task --summary 'Release notes' \
+  --assignee me --labels release,docs --priority High --due 2026-07-01
+jira issues update ENG-123 --assignee me --priority Highest
 ```
 
 Additional fields can be passed as `--field key=value`. JSON values are supported:
@@ -112,6 +128,14 @@ Attach files to an existing issue with `issues attach`:
 
 ```bash
 jira issues attach ENG-123 --file ./crash.log --file ./screenshot.png
+```
+
+List, download, and delete attachments:
+
+```bash
+jira attachments list ENG-123
+jira attachments download 10042 --output ./crash.log
+jira attachments delete 10042
 ```
 
 Both commands return the uploaded attachment metadata as JSON. Jira allows at
