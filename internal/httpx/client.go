@@ -205,6 +205,36 @@ func createFilePart(writer *multipart.Writer, part FilePart) (io.Writer, error) 
 	return writer.CreatePart(header)
 }
 
+// Download streams the body of a GET request to w. It is used for binary
+// endpoints such as attachment content that JSON-oriented Do cannot handle.
+// Jira returns a redirect to a signed media URL; the default client follows it
+// and strips the Authorization header on cross-host redirects, as required.
+func (c *Client) Download(ctx context.Context, path string, w io.Writer) error {
+	target := path
+	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+		target = c.profile.SiteURL + path
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", auth.BasicAuthHeader(c.profile))
+	req.Header.Set("X-Atlassian-Token", "no-check")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		payload, _ := io.ReadAll(resp.Body)
+		return parseAPIError(resp.StatusCode, payload)
+	}
+	_, err = io.Copy(w, resp.Body)
+	return err
+}
+
 func handleResponse(resp *http.Response, out any) error {
 	payload, err := io.ReadAll(resp.Body)
 	if err != nil {
