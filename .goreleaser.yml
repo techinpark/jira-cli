@@ -1,3 +1,5 @@
+version: 2
+
 project_name: jira-cli
 
 before:
@@ -21,9 +23,17 @@ brews:
   - repository:
       owner: techinpark
       name: homebrew-tap
+    # Homebrew reads formulas from the tap's Formula/ subdirectory, which takes
+    # precedence over the repo root. Write there so releases update the formula
+    # brew actually installs.
+    directory: Formula
     name: jira-cloud-cli
     homepage: https://github.com/techinpark/jira-cli
     description: Jira CLI for Jira Cloud REST API v3
+    license: MIT
+    # Release archives ship the prebuilt binary as "jira"; install it renamed to
+    # "jira-cloud-cli" (no Go toolchain, no source build needed).
     install: |
-      system "go", "build", "-o", "jira-cloud-cli", "./main.go"
-      bin.install "jira-cloud-cli"
+      bin.install "jira" => "jira-cloud-cli"
+    test: |
+      system "#{bin}/jira-cloud-cli", "--help"
