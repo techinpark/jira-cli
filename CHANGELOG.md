@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fix JQL search pagination: send `nextPageToken` to fetch pages past the first; add `issues search --page-token` and `--all`
 - `users search` and `auth whoami` for resolving Jira Cloud accountIds
 - `issues assign` (with `--unassign`) and user references that accept `me`, an email, or an accountId
 - Convenience flags on `issues create`/`update`: `--assignee`, `--labels`, `--priority`, `--parent`, `--due`

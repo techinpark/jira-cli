@@ -30,6 +30,7 @@ type IssueRef struct {
 type SearchResult struct {
 	Issues        []Issue        `json:"issues"`
 	NextPageToken string         `json:"next_page_token,omitempty"`
+	IsLast        bool           `json:"is_last"`
 	Names         map[string]any `json:"names,omitempty"`
 	Schema        map[string]any `json:"schema,omitempty"`
 }

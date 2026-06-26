@@ -19,6 +19,12 @@
 - `jira attachments`
 - `jira raw`
 
+## Search pagination
+
+- `issues search` is token-paginated: `--limit` is the page size, and the JSON `next_page_token` (when present) points to the next page
+- Pass `--page-token <token>` to fetch the next page, or `--all` to follow tokens and return every page at once
+- `is_last` in the JSON indicates the final page
+
 ## Safe automation rules
 
 - Reads: safe for autonomous use

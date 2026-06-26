@@ -27,9 +27,10 @@ type ListProjectsOptions struct {
 }
 
 type SearchOptions struct {
-	JQL    string
-	Fields []string
-	Limit  int
+	JQL       string
+	Fields    []string
+	Limit     int
+	PageToken string
 }
 
 type CreateIssueInput struct {
@@ -125,9 +126,16 @@ func (c *Client) SearchIssues(ctx context.Context, opts SearchOptions) (SearchRe
 	if len(opts.Fields) > 0 {
 		body["fields"] = opts.Fields
 	}
+	// The enhanced /search/jql endpoint is token-paginated: to fetch a page
+	// past the first, echo the nextPageToken from the previous response back in
+	// the request. Without this, only the first page is ever reachable.
+	if opts.PageToken != "" {
+		body["nextPageToken"] = opts.PageToken
+	}
 	var out struct {
 		Issues        []issueDocument `json:"issues"`
 		NextPageToken string          `json:"nextPageToken"`
+		IsLast        bool            `json:"isLast"`
 		Names         map[string]any  `json:"names"`
 		Schema        map[string]any  `json:"schema"`
 	}
@@ -141,9 +149,53 @@ func (c *Client) SearchIssues(ctx context.Context, opts SearchOptions) (SearchRe
 	return SearchResult{
 		Issues:        issues,
 		NextPageToken: out.NextPageToken,
+		IsLast:        out.IsLast,
 		Names:         out.Names,
 		Schema:        out.Schema,
 	}, nil
+}
+
+// SearchAllIssues fetches every page of a JQL search, following nextPageToken
+// until the API reports the last page (empty token or isLast). maxPages bounds
+// the loop as a safety net against a non-terminating token sequence; pass 0 for
+// the default cap.
+func (c *Client) SearchAllIssues(ctx context.Context, opts SearchOptions, maxPages int) (SearchResult, error) {
+	if maxPages <= 0 {
+		maxPages = 1000
+	}
+	var (
+		all          []Issue
+		names, schma map[string]any
+	)
+	token := opts.PageToken
+	for page := 0; page < maxPages; page++ {
+		pageOpts := opts
+		pageOpts.PageToken = token
+		res, err := c.SearchIssues(ctx, pageOpts)
+		if err != nil {
+			return SearchResult{}, err
+		}
+		all = append(all, res.Issues...)
+		if names == nil {
+			names = res.Names
+		}
+		if schma == nil {
+			schma = res.Schema
+		}
+		next := res.NextPageToken
+		if next == "" || res.IsLast {
+			return SearchResult{Issues: all, IsLast: true, Names: names, Schema: schma}, nil
+		}
+		// Guard against a server that keeps returning the same token: without
+		// this the loop would re-fetch and duplicate the same page up to the cap.
+		if next == token {
+			return SearchResult{}, fmt.Errorf("search pagination token did not advance; aborting to avoid an infinite loop")
+		}
+		token = next
+	}
+	// Hit the page cap before the API signalled the last page; report the token
+	// so the caller can resume rather than silently truncating.
+	return SearchResult{Issues: all, NextPageToken: token, IsLast: false, Names: names, Schema: schma}, nil
 }
 
 func (c *Client) CreateIssue(ctx context.Context, input CreateIssueInput) (IssueRef, error) {

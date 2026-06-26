@@ -279,6 +279,80 @@ func TestAddAttachments(t *testing.T) {
 	}
 }
 
+func TestSearchPagination(t *testing.T) {
+	var requestedTokens []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/search/jql" {
+			http.NotFound(w, r)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		// maxResults must be sent as the per-page size (default 50 here).
+		if mr, _ := body["maxResults"].(float64); mr != 50 {
+			t.Fatalf("expected maxResults 50 per page, got %v", body["maxResults"])
+		}
+		token, _ := body["nextPageToken"].(string)
+		requestedTokens = append(requestedTokens, token)
+		switch token {
+		case "":
+			// First page: more results follow.
+			_, _ = w.Write([]byte(`{"issues":[{"id":"1","key":"ENG-1"}],"nextPageToken":"tok2","isLast":false}`))
+		case "tok2":
+			// Last page: no nextPageToken, isLast true.
+			_, _ = w.Write([]byte(`{"issues":[{"id":"2","key":"ENG-2"}],"isLast":true}`))
+		default:
+			t.Fatalf("unexpected page token: %q", token)
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	ctx := context.Background()
+
+	// A single SearchIssues with a PageToken must SEND it as nextPageToken.
+	page2, err := client.SearchIssues(ctx, SearchOptions{JQL: "project = ENG", PageToken: "tok2"})
+	if err != nil || len(page2.Issues) != 1 || page2.Issues[0].Key != "ENG-2" || !page2.IsLast {
+		t.Fatalf("unexpected page2: %+v err=%v", page2, err)
+	}
+	if requestedTokens[len(requestedTokens)-1] != "tok2" {
+		t.Fatalf("page token was not sent to the server: %+v", requestedTokens)
+	}
+
+	// SearchAllIssues must follow nextPageToken and accumulate every page.
+	all, err := client.SearchAllIssues(ctx, SearchOptions{JQL: "project = ENG"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all.Issues) != 2 || all.Issues[0].Key != "ENG-1" || all.Issues[1].Key != "ENG-2" {
+		t.Fatalf("expected both pages accumulated, got %+v", all)
+	}
+	if !all.IsLast || all.NextPageToken != "" {
+		t.Fatalf("fully-paginated result should be last with no token: %+v", all)
+	}
+}
+
+func TestSearchAllAbortsOnStuckToken(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		// Always return the same token with isLast=false (a misbehaving server).
+		_, _ = w.Write([]byte(`{"issues":[{"id":"1","key":"ENG-1"}],"nextPageToken":"stuck","isLast":false}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	_, err := client.SearchAllIssues(context.Background(), SearchOptions{JQL: "project = ENG"}, 0)
+	if err == nil {
+		t.Fatal("expected error when the pagination token does not advance")
+	}
+	if calls > 3 {
+		t.Fatalf("expected to abort quickly, made %d calls", calls)
+	}
+}
+
 func TestUserAndAttachmentDataLayer(t *testing.T) {
 	var assigneeBody string
 	var createBody map[string]any

@@ -99,6 +99,24 @@ jira issues create --project ENG --type Task --summary 'Release notes' \
 jira issues update ENG-123 --assignee me --priority Highest
 ```
 
+### Pagination
+
+`issues search` uses Jira's enhanced JQL search, which is token-paginated.
+`--limit` is the page size; the response includes a `next_page_token` when more
+results exist. Fetch the next page by passing it back, or use `--all` to follow
+the tokens and return every page in one call:
+
+```bash
+# one page (page size 50); note the next_page_token in the JSON
+jira issues search --jql 'project = ENG' --limit 50 --json
+
+# fetch the next page
+jira issues search --jql 'project = ENG' --page-token <next_page_token> --json
+
+# fetch every page in one command
+jira issues search --jql 'project = ENG' --all --json
+```
+
 Additional fields can be passed as `--field key=value`. JSON values are supported:
 
 ```bash
