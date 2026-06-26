@@ -54,6 +54,8 @@ func newIssuesSearchCommand() *cobra.Command {
 	var jql string
 	var fields []string
 	var limit int
+	var pageToken string
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:     "search",
@@ -64,11 +66,18 @@ func newIssuesSearchCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := client.SearchIssues(context.Background(), jira.SearchOptions{
-				JQL:    jql,
-				Fields: fields,
-				Limit:  limit,
-			})
+			opts := jira.SearchOptions{
+				JQL:       jql,
+				Fields:    fields,
+				Limit:     limit,
+				PageToken: pageToken,
+			}
+			var result jira.SearchResult
+			if all {
+				result, err = client.SearchAllIssues(context.Background(), opts, 0)
+			} else {
+				result, err = client.SearchIssues(context.Background(), opts)
+			}
 			if err != nil {
 				return err
 			}
@@ -80,7 +89,9 @@ func newIssuesSearchCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&jql, "jql", "", "JQL expression")
 	cmd.Flags().StringSliceVar(&fields, "fields", []string{"summary", "status", "issuetype", "assignee"}, "Fields to return")
-	cmd.Flags().IntVar(&limit, "limit", 50, "Maximum number of issues")
+	cmd.Flags().IntVar(&limit, "limit", 50, "Page size: maximum number of issues returned per page")
+	cmd.Flags().StringVar(&pageToken, "page-token", "", "nextPageToken from a previous response, to fetch the next page")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all pages by following nextPageToken")
 	_ = cmd.MarkFlagRequired("jql")
 	return cmd
 }
