@@ -239,6 +239,79 @@ func (c *Client) DeleteIssue(ctx context.Context, key string, deleteSubtasks boo
 	return c.httpClient.Do(ctx, http.MethodDelete, "/rest/api/3/issue/"+url.PathEscape(key), query, nil, nil)
 }
 
+// metaMaxResults caps the per-page size for the paginated create-metadata
+// endpoints. 200 is the API maximum and comfortably covers a project's issue
+// types and a single issue type's createable fields in one request.
+const metaMaxResults = "200"
+
+// CreateMetaIssueTypes returns the issue types that can be created in a project,
+// each as a raw metadata map (id, name, subtask, ...). Raw maps are returned so
+// no detail is lost in JSON output.
+func (c *Client) CreateMetaIssueTypes(ctx context.Context, projectKey string) ([]map[string]any, error) {
+	query := url.Values{}
+	query.Set("maxResults", metaMaxResults)
+	var out struct {
+		IssueTypes []map[string]any `json:"issueTypes"`
+	}
+	err := c.httpClient.Do(ctx, http.MethodGet, "/rest/api/3/issue/createmeta/"+url.PathEscape(projectKey)+"/issuetypes", query, nil, &out)
+	return out.IssueTypes, err
+}
+
+// CreateMetaFields returns the createable field metadata (required flag,
+// allowedValues, schema, ...) for a project and issue type ID.
+func (c *Client) CreateMetaFields(ctx context.Context, projectKey, issueTypeID string) ([]map[string]any, error) {
+	query := url.Values{}
+	query.Set("maxResults", metaMaxResults)
+	var out struct {
+		Results []map[string]any `json:"results"`
+		Fields  []map[string]any `json:"fields"`
+	}
+	if err := c.httpClient.Do(ctx, http.MethodGet, "/rest/api/3/issue/createmeta/"+url.PathEscape(projectKey)+"/issuetypes/"+url.PathEscape(issueTypeID), query, nil, &out); err != nil {
+		return nil, err
+	}
+	if len(out.Results) > 0 {
+		return out.Results, nil
+	}
+	return out.Fields, nil
+}
+
+// ResolveIssueTypeID resolves an issue type name to its ID within a project. A
+// numeric value is returned unchanged.
+func (c *Client) ResolveIssueTypeID(ctx context.Context, projectKey, issueType string) (string, error) {
+	if isDigits(issueType) {
+		return issueType, nil
+	}
+	types, err := c.CreateMetaIssueTypes(ctx, projectKey)
+	if err != nil {
+		return "", err
+	}
+	for _, item := range types {
+		if name, _ := item["name"].(string); strings.EqualFold(name, issueType) {
+			if id, _ := item["id"].(string); id != "" {
+				return id, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("issue type %q not found in project %s", issueType, projectKey)
+}
+
+// EditMeta returns the editable field metadata for an issue, keyed by field ID.
+func (c *Client) EditMeta(ctx context.Context, issueKey string) (map[string]any, error) {
+	var out struct {
+		Fields map[string]any `json:"fields"`
+	}
+	err := c.httpClient.Do(ctx, http.MethodGet, "/rest/api/3/issue/"+url.PathEscape(issueKey)+"/editmeta", nil, nil, &out)
+	return out.Fields, err
+}
+
+// ListFields returns every field (system and custom) with its id, key, name and
+// schema, used to map a human field name to its customfield_* id.
+func (c *Client) ListFields(ctx context.Context) ([]map[string]any, error) {
+	var out []map[string]any
+	err := c.httpClient.Do(ctx, http.MethodGet, "/rest/api/3/field", nil, nil, &out)
+	return out, err
+}
+
 // AddAttachments uploads one or more local files to an issue. Jira has no way to
 // embed attachments when an issue is created, so callers create the issue first
 // and then attach files to the returned key.

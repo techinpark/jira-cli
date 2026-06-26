@@ -17,7 +17,15 @@
 - `jira worklogs`
 - `jira users`
 - `jira attachments`
+- `jira fields`
 - `jira raw`
+
+## Metadata discovery (do this before writing)
+
+- Before `issues create`, run `issues create-meta --project <key>` to list valid issue types, then `issues create-meta --project <key> --type <name>` to learn each field's `required` flag, `schema`, and `allowedValues` (with IDs)
+- Before `issues update`, run `issues edit-meta <issue-key>` for the editable fields and their allowed values
+- Use `fields list` to map a human field name to its id (e.g. `Story Points` → `customfield_10016`) for `--field`
+- This turns writes from guess/422/retry into: fetch metadata → pick valid values → write once
 
 ## Search pagination
 
@@ -29,7 +37,7 @@
 
 - Reads: safe for autonomous use
 - Writes: require explicit issue keys, transition names or IDs, and field values
-- Avoid free-form mutation guesses for Jira custom fields
+- Do not guess custom fields — resolve them first with `fields list` and `issues create-meta`/`edit-meta` (see Metadata discovery above)
 - Use JSON field values when a field expects structured data
 
 ## Users and assignment

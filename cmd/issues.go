@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/spf13/cobra"
 	"github.com/techinpark/jira-cli/internal/jira"
@@ -21,6 +22,8 @@ func newIssuesCommand() *cobra.Command {
 	cmd.AddCommand(newIssuesDeleteCommand())
 	cmd.AddCommand(newIssuesAttachCommand())
 	cmd.AddCommand(newIssuesAssignCommand())
+	cmd.AddCommand(newIssuesCreateMetaCommand())
+	cmd.AddCommand(newIssuesEditMetaCommand())
 	return cmd
 }
 
@@ -343,5 +346,96 @@ func newIssuesAssignCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee reference: me, an email, or an accountId")
 	cmd.Flags().BoolVar(&unassign, "unassign", false, "Remove the current assignee")
+	return cmd
+}
+
+func newIssuesCreateMetaCommand() *cobra.Command {
+	var project string
+	var issueType string
+
+	cmd := &cobra.Command{
+		Use:     "create-meta",
+		Short:   "Show creatable issue types (or, with --type, createable fields) for a project",
+		PreRunE: validateOutputFlag,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			client, profile, err := newJiraClient(context.Background())
+			if err != nil {
+				return err
+			}
+			project, err = requiredProjectArg(project, profile)
+			if err != nil {
+				return err
+			}
+			ctx := context.Background()
+
+			if issueType == "" {
+				types, err := client.CreateMetaIssueTypes(ctx, project)
+				if err != nil {
+					return err
+				}
+				if outputJSON() {
+					return writeJSON(cmd, types)
+				}
+				rows := make([][]string, 0, len(types))
+				for _, item := range types {
+					rows = append(rows, []string{mapString(item, "id"), mapString(item, "name"), mapYesNo(item, "subtask")})
+				}
+				return output.RenderTable(cmd.OutOrStdout(), []string{"ID", "Name", "Subtask"}, rows)
+			}
+
+			typeID, err := client.ResolveIssueTypeID(ctx, project, issueType)
+			if err != nil {
+				return err
+			}
+			fields, err := client.CreateMetaFields(ctx, project, typeID)
+			if err != nil {
+				return err
+			}
+			if outputJSON() {
+				return writeJSON(cmd, fields)
+			}
+			rows := make([][]string, 0, len(fields))
+			for _, field := range fields {
+				rows = append(rows, []string{mapString(field, "fieldId"), mapString(field, "name"), mapYesNo(field, "required"), mapSchemaType(field)})
+			}
+			return output.RenderTable(cmd.OutOrStdout(), []string{"FieldID", "Name", "Required", "Type"}, rows)
+		},
+	}
+	cmd.Flags().StringVar(&project, "project", "", "Project key or ID")
+	cmd.Flags().StringVar(&issueType, "type", "", "Issue type name or ID; omit to list the project's issue types")
+	return cmd
+}
+
+func newIssuesEditMetaCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "edit-meta <issue-key>",
+		Short:   "Show editable fields and allowed values for an issue",
+		Args:    cobra.ExactArgs(1),
+		PreRunE: validateOutputFlag,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, _, err := newJiraClient(context.Background())
+			if err != nil {
+				return err
+			}
+			fields, err := client.EditMeta(context.Background(), args[0])
+			if err != nil {
+				return err
+			}
+			if outputJSON() {
+				return writeJSON(cmd, fields)
+			}
+			ids := make([]string, 0, len(fields))
+			for id := range fields {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			rows := make([][]string, 0, len(fields))
+			for _, id := range ids {
+				meta, _ := fields[id].(map[string]any)
+				rows = append(rows, []string{id, mapString(meta, "name"), mapYesNo(meta, "required"), mapSchemaType(meta)})
+			}
+			return output.RenderTable(cmd.OutOrStdout(), []string{"FieldID", "Name", "Required", "Type"}, rows)
+		},
+	}
 	return cmd
 }

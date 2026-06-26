@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Metadata discovery for reliable writes: `issues create-meta`, `issues edit-meta`, and `fields list`
 - Fix JQL search pagination: send `nextPageToken` to fetch pages past the first; add `issues search --page-token` and `--all`
 - `users search` and `auth whoami` for resolving Jira Cloud accountIds
 - `issues assign` (with `--unassign`) and user references that accept `me`, an email, or an accountId
