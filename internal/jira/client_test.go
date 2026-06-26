@@ -405,6 +405,58 @@ func TestMetadataDiscovery(t *testing.T) {
 	}
 }
 
+func TestIssueLinks(t *testing.T) {
+	var linkBody map[string]any
+	var deleted string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/rest/api/3/issueLinkType" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"issueLinkTypes":[{"id":"1000","name":"Blocks","inward":"is blocked by","outward":"blocks"}]}`))
+		case r.URL.Path == "/rest/api/3/issueLink" && r.Method == http.MethodPost:
+			_ = json.NewDecoder(r.Body).Decode(&linkBody)
+			w.WriteHeader(http.StatusCreated)
+		case r.URL.Path == "/rest/api/3/issue/ENG-1" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"id":"1","key":"ENG-1","fields":{"issuelinks":[{"id":"10","type":{"name":"Blocks","inward":"is blocked by","outward":"blocks"},"outwardIssue":{"key":"ENG-2"}}]}}`))
+		case r.URL.Path == "/rest/api/3/issueLink/10" && r.Method == http.MethodDelete:
+			deleted = "10"
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	ctx := context.Background()
+
+	types, err := client.ListIssueLinkTypes(ctx)
+	if err != nil || len(types) != 1 || types[0].Name != "Blocks" || types[0].Outward != "blocks" {
+		t.Fatalf("unexpected link types: %+v err=%v", types, err)
+	}
+
+	if err := client.LinkIssues(ctx, LinkIssuesInput{Type: "Blocks", Inward: "ENG-2", Outward: "ENG-1", Comment: "see also"}); err != nil {
+		t.Fatal(err)
+	}
+	if linkBody["type"].(map[string]any)["name"] != "Blocks" {
+		t.Fatalf("unexpected link type in body: %+v", linkBody)
+	}
+	if linkBody["inwardIssue"].(map[string]any)["key"] != "ENG-2" || linkBody["outwardIssue"].(map[string]any)["key"] != "ENG-1" {
+		t.Fatalf("unexpected link issues in body: %+v", linkBody)
+	}
+	if _, ok := linkBody["comment"]; !ok {
+		t.Fatalf("expected comment in link body: %+v", linkBody)
+	}
+
+	links, err := client.ListIssueLinks(ctx, "ENG-1")
+	if err != nil || len(links) != 1 || links[0]["id"] != "10" {
+		t.Fatalf("unexpected links: %+v err=%v", links, err)
+	}
+
+	if err := client.DeleteIssueLink(ctx, "10"); err != nil || deleted != "10" {
+		t.Fatalf("delete link failed: deleted=%q err=%v", deleted, err)
+	}
+}
+
 func TestCreateMetaPaginatesAllPages(t *testing.T) {
 	var startAts []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -337,6 +337,66 @@ func (c *Client) ListFields(ctx context.Context) ([]map[string]any, error) {
 	return out, err
 }
 
+// LinkIssuesInput describes a link between two issues. Inward and Outward are
+// issue keys (or IDs); Type is a link type name (or ID) from ListIssueLinkTypes.
+type LinkIssuesInput struct {
+	Type    string
+	Inward  string
+	Outward string
+	Comment string
+}
+
+// ListIssueLinkTypes returns the configured issue link types and their inward
+// and outward labels (e.g. "blocks" / "is blocked by").
+func (c *Client) ListIssueLinkTypes(ctx context.Context) ([]IssueLinkType, error) {
+	var out struct {
+		IssueLinkTypes []IssueLinkType `json:"issueLinkTypes"`
+	}
+	if err := c.httpClient.Do(ctx, http.MethodGet, "/rest/api/3/issueLinkType", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return out.IssueLinkTypes, nil
+}
+
+// LinkIssues creates a link between two issues. The outward issue relates to the
+// inward issue via the link type's outward description (e.g. outward "blocks"
+// inward).
+func (c *Client) LinkIssues(ctx context.Context, input LinkIssuesInput) error {
+	body := map[string]any{
+		"type":         refByNameOrID(input.Type, "name"),
+		"inwardIssue":  refByNameOrID(input.Inward, "key"),
+		"outwardIssue": refByNameOrID(input.Outward, "key"),
+	}
+	if input.Comment != "" {
+		body["comment"] = map[string]any{"body": adf.PlainTextDoc(input.Comment)}
+	}
+	return c.httpClient.Do(ctx, http.MethodPost, "/rest/api/3/issueLink", nil, body, nil)
+}
+
+// ListIssueLinks returns the links on an issue as raw maps so no detail is lost
+// in JSON output. Each entry carries its type and the inward or outward issue.
+func (c *Client) ListIssueLinks(ctx context.Context, issueKey string) ([]map[string]any, error) {
+	query := url.Values{}
+	query.Set("fields", "issuelinks")
+	var out struct {
+		Fields struct {
+			IssueLinks []map[string]any `json:"issuelinks"`
+		} `json:"fields"`
+	}
+	if err := c.httpClient.Do(ctx, http.MethodGet, "/rest/api/3/issue/"+url.PathEscape(issueKey), query, nil, &out); err != nil {
+		return nil, err
+	}
+	if out.Fields.IssueLinks == nil {
+		return []map[string]any{}, nil
+	}
+	return out.Fields.IssueLinks, nil
+}
+
+// DeleteIssueLink removes an issue link by its ID.
+func (c *Client) DeleteIssueLink(ctx context.Context, linkID string) error {
+	return c.httpClient.Do(ctx, http.MethodDelete, "/rest/api/3/issueLink/"+url.PathEscape(linkID), nil, nil, nil)
+}
+
 // AddAttachments uploads one or more local files to an issue. Jira has no way to
 // embed attachments when an issue is created, so callers create the issue first
 // and then attach files to the returned key.

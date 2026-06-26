@@ -67,6 +67,13 @@ type Attachment struct {
 	Content  string `json:"content,omitempty"`
 }
 
+type IssueLinkType struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Inward  string `json:"inward"`
+	Outward string `json:"outward"`
+}
+
 type User struct {
 	AccountID   string `json:"account_id"`
 	DisplayName string `json:"display_name,omitempty"`

@@ -18,6 +18,7 @@
 - `jira users`
 - `jira attachments`
 - `jira fields`
+- `jira links`
 - `jira raw`
 
 ## Metadata discovery (do this before writing)
@@ -32,6 +33,12 @@
 - `issues search` is token-paginated: `--limit` is the page size, and the JSON `next_page_token` (when present) points to the next page
 - Pass `--page-token <token>` to fetch the next page, or `--all` to follow tokens and return every page at once
 - `is_last` in the JSON indicates the final page
+
+## Issue links
+
+- `links types` lists valid link type names and their inward/outward labels — call it before `links add` since types are configured per instance
+- `links add --outward <key> --inward <key> --type <name>`: the outward issue relates to the inward issue via the type's outward label (e.g. outward "blocks" inward)
+- `links list <key>` shows an issue's links with their link IDs; `links delete <link-id>` removes one
 
 ## Safe automation rules
 

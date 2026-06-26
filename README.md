@@ -184,6 +184,26 @@ Because Jira creates the issue before attachments are uploaded, `issues create
 created issue (with its `key`) as JSON and then exits non-zero, so you can retry
 with `jira issues attach <key> --file ...`.
 
+## Issue links
+
+Discover link types, then link or unlink issues. A link is directional: the
+`--outward` issue relates to the `--inward` issue via the type's outward label
+(e.g. for `Blocks`, outward "blocks" / inward "is blocked by").
+
+```bash
+# available link types and their inward/outward labels
+jira links types
+
+# ENG-1 blocks ENG-2
+jira links add --outward ENG-1 --inward ENG-2 --type Blocks --comment 'discovered in QA'
+
+# links on an issue (with their link IDs)
+jira links list ENG-1
+
+# remove a link by id
+jira links delete 10010
+```
+
 ## Raw API Calls
 
 Use `raw` when the direct command set does not cover an endpoint yet.
