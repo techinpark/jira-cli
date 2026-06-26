@@ -239,40 +239,60 @@ func (c *Client) DeleteIssue(ctx context.Context, key string, deleteSubtasks boo
 	return c.httpClient.Do(ctx, http.MethodDelete, "/rest/api/3/issue/"+url.PathEscape(key), query, nil, nil)
 }
 
-// metaMaxResults caps the per-page size for the paginated create-metadata
-// endpoints. 200 is the API maximum and comfortably covers a project's issue
-// types and a single issue type's createable fields in one request.
-const metaMaxResults = "200"
+// metaPageSize is the per-page size for the startAt/total-paginated create
+// metadata endpoints; 200 is the API maximum.
+const metaPageSize = 200
+
+// metaMaxPages bounds the pagination loop as a safety net.
+const metaMaxPages = 50
+
+// fetchMetaPages walks a startAt/total-paginated metadata endpoint, returning
+// every item (under the first non-empty of the given array keys) so results are
+// never silently truncated at one page. A non-nil empty slice is always returned.
+func (c *Client) fetchMetaPages(ctx context.Context, path string, arrayKeys ...string) ([]map[string]any, error) {
+	all := []map[string]any{}
+	startAt := 0
+	for page := 0; page < metaMaxPages; page++ {
+		query := url.Values{}
+		query.Set("maxResults", strconv.Itoa(metaPageSize))
+		query.Set("startAt", strconv.Itoa(startAt))
+		var raw map[string]json.RawMessage
+		if err := c.httpClient.Do(ctx, http.MethodGet, path, query, nil, &raw); err != nil {
+			return nil, err
+		}
+		var items []map[string]any
+		for _, key := range arrayKeys {
+			if v, ok := raw[key]; ok {
+				if err := json.Unmarshal(v, &items); err == nil && len(items) > 0 {
+					break
+				}
+			}
+		}
+		all = append(all, items...)
+		total := 0
+		if v, ok := raw["total"]; ok {
+			_ = json.Unmarshal(v, &total)
+		}
+		if len(items) == 0 || len(all) >= total {
+			break
+		}
+		startAt = len(all)
+	}
+	return all, nil
+}
 
 // CreateMetaIssueTypes returns the issue types that can be created in a project,
 // each as a raw metadata map (id, name, subtask, ...). Raw maps are returned so
 // no detail is lost in JSON output.
 func (c *Client) CreateMetaIssueTypes(ctx context.Context, projectKey string) ([]map[string]any, error) {
-	query := url.Values{}
-	query.Set("maxResults", metaMaxResults)
-	var out struct {
-		IssueTypes []map[string]any `json:"issueTypes"`
-	}
-	err := c.httpClient.Do(ctx, http.MethodGet, "/rest/api/3/issue/createmeta/"+url.PathEscape(projectKey)+"/issuetypes", query, nil, &out)
-	return out.IssueTypes, err
+	return c.fetchMetaPages(ctx, "/rest/api/3/issue/createmeta/"+url.PathEscape(projectKey)+"/issuetypes", "issueTypes")
 }
 
 // CreateMetaFields returns the createable field metadata (required flag,
-// allowedValues, schema, ...) for a project and issue type ID.
+// allowedValues, schema, ...) for a project and issue type ID. The response
+// array is "results" on current Jira and "fields" on older instances.
 func (c *Client) CreateMetaFields(ctx context.Context, projectKey, issueTypeID string) ([]map[string]any, error) {
-	query := url.Values{}
-	query.Set("maxResults", metaMaxResults)
-	var out struct {
-		Results []map[string]any `json:"results"`
-		Fields  []map[string]any `json:"fields"`
-	}
-	if err := c.httpClient.Do(ctx, http.MethodGet, "/rest/api/3/issue/createmeta/"+url.PathEscape(projectKey)+"/issuetypes/"+url.PathEscape(issueTypeID), query, nil, &out); err != nil {
-		return nil, err
-	}
-	if len(out.Results) > 0 {
-		return out.Results, nil
-	}
-	return out.Fields, nil
+	return c.fetchMetaPages(ctx, "/rest/api/3/issue/createmeta/"+url.PathEscape(projectKey)+"/issuetypes/"+url.PathEscape(issueTypeID), "results", "fields")
 }
 
 // ResolveIssueTypeID resolves an issue type name to its ID within a project. A
@@ -300,14 +320,19 @@ func (c *Client) EditMeta(ctx context.Context, issueKey string) (map[string]any,
 	var out struct {
 		Fields map[string]any `json:"fields"`
 	}
-	err := c.httpClient.Do(ctx, http.MethodGet, "/rest/api/3/issue/"+url.PathEscape(issueKey)+"/editmeta", nil, nil, &out)
-	return out.Fields, err
+	if err := c.httpClient.Do(ctx, http.MethodGet, "/rest/api/3/issue/"+url.PathEscape(issueKey)+"/editmeta", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	if out.Fields == nil {
+		out.Fields = map[string]any{}
+	}
+	return out.Fields, nil
 }
 
 // ListFields returns every field (system and custom) with its id, key, name and
 // schema, used to map a human field name to its customfield_* id.
 func (c *Client) ListFields(ctx context.Context) ([]map[string]any, error) {
-	var out []map[string]any
+	out := []map[string]any{}
 	err := c.httpClient.Do(ctx, http.MethodGet, "/rest/api/3/field", nil, nil, &out)
 	return out, err
 }

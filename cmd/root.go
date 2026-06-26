@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -152,4 +153,13 @@ func mapSchemaType(m map[string]any) string {
 		}
 	}
 	return ""
+}
+
+// mapArrayLen renders the length of a JSON array field for table output (the
+// count of allowedValues), or "-" when absent. Full values stay in --json.
+func mapArrayLen(m map[string]any, key string) string {
+	if arr, ok := m[key].([]any); ok && len(arr) > 0 {
+		return strconv.Itoa(len(arr))
+	}
+	return "-"
 }

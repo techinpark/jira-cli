@@ -396,9 +396,9 @@ func newIssuesCreateMetaCommand() *cobra.Command {
 			}
 			rows := make([][]string, 0, len(fields))
 			for _, field := range fields {
-				rows = append(rows, []string{mapString(field, "fieldId"), mapString(field, "name"), mapYesNo(field, "required"), mapSchemaType(field)})
+				rows = append(rows, []string{mapString(field, "fieldId"), mapString(field, "name"), mapYesNo(field, "required"), mapSchemaType(field), mapArrayLen(field, "allowedValues")})
 			}
-			return output.RenderTable(cmd.OutOrStdout(), []string{"FieldID", "Name", "Required", "Type"}, rows)
+			return output.RenderTable(cmd.OutOrStdout(), []string{"FieldID", "Name", "Required", "Type", "Allowed"}, rows)
 		},
 	}
 	cmd.Flags().StringVar(&project, "project", "", "Project key or ID")
@@ -432,9 +432,9 @@ func newIssuesEditMetaCommand() *cobra.Command {
 			rows := make([][]string, 0, len(fields))
 			for _, id := range ids {
 				meta, _ := fields[id].(map[string]any)
-				rows = append(rows, []string{id, mapString(meta, "name"), mapYesNo(meta, "required"), mapSchemaType(meta)})
+				rows = append(rows, []string{id, mapString(meta, "name"), mapYesNo(meta, "required"), mapSchemaType(meta), mapArrayLen(meta, "allowedValues")})
 			}
-			return output.RenderTable(cmd.OutOrStdout(), []string{"FieldID", "Name", "Required", "Type"}, rows)
+			return output.RenderTable(cmd.OutOrStdout(), []string{"FieldID", "Name", "Required", "Type", "Allowed"}, rows)
 		},
 	}
 	return cmd

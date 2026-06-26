@@ -405,6 +405,37 @@ func TestMetadataDiscovery(t *testing.T) {
 	}
 }
 
+func TestCreateMetaPaginatesAllPages(t *testing.T) {
+	var startAts []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/issue/createmeta/ENG/issuetypes" {
+			http.NotFound(w, r)
+			return
+		}
+		startAts = append(startAts, r.URL.Query().Get("startAt"))
+		switch r.URL.Query().Get("startAt") {
+		case "0":
+			_, _ = w.Write([]byte(`{"issueTypes":[{"id":"1","name":"A"}],"total":2,"maxResults":200,"startAt":0}`))
+		case "1":
+			_, _ = w.Write([]byte(`{"issueTypes":[{"id":"2","name":"B"}],"total":2,"maxResults":200,"startAt":1}`))
+		default:
+			t.Fatalf("unexpected startAt: %q", r.URL.Query().Get("startAt"))
+		}
+	}))
+	defer server.Close()
+
+	types, err := newTestClient(server.URL).CreateMetaIssueTypes(context.Background(), "ENG")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(types) != 2 || types[0]["id"] != "1" || types[1]["id"] != "2" {
+		t.Fatalf("expected both pages, got %+v", types)
+	}
+	if len(startAts) != 2 || startAts[0] != "0" || startAts[1] != "1" {
+		t.Fatalf("expected startAt 0 then 1, got %+v", startAts)
+	}
+}
+
 func TestSearchAllAbortsOnStuckToken(t *testing.T) {
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
