@@ -182,10 +182,16 @@ func (c *Client) SearchAllIssues(ctx context.Context, opts SearchOptions, maxPag
 		if schma == nil {
 			schma = res.Schema
 		}
-		token = res.NextPageToken
-		if token == "" || res.IsLast {
+		next := res.NextPageToken
+		if next == "" || res.IsLast {
 			return SearchResult{Issues: all, IsLast: true, Names: names, Schema: schma}, nil
 		}
+		// Guard against a server that keeps returning the same token: without
+		// this the loop would re-fetch and duplicate the same page up to the cap.
+		if next == token {
+			return SearchResult{}, fmt.Errorf("search pagination token did not advance; aborting to avoid an infinite loop")
+		}
+		token = next
 	}
 	// Hit the page cap before the API signalled the last page; report the token
 	// so the caller can resume rather than silently truncating.

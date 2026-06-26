@@ -290,6 +290,10 @@ func TestSearchPagination(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
+		// maxResults must be sent as the per-page size (default 50 here).
+		if mr, _ := body["maxResults"].(float64); mr != 50 {
+			t.Fatalf("expected maxResults 50 per page, got %v", body["maxResults"])
+		}
 		token, _ := body["nextPageToken"].(string)
 		requestedTokens = append(requestedTokens, token)
 		switch token {
@@ -327,6 +331,25 @@ func TestSearchPagination(t *testing.T) {
 	}
 	if !all.IsLast || all.NextPageToken != "" {
 		t.Fatalf("fully-paginated result should be last with no token: %+v", all)
+	}
+}
+
+func TestSearchAllAbortsOnStuckToken(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		// Always return the same token with isLast=false (a misbehaving server).
+		_, _ = w.Write([]byte(`{"issues":[{"id":"1","key":"ENG-1"}],"nextPageToken":"stuck","isLast":false}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	_, err := client.SearchAllIssues(context.Background(), SearchOptions{JQL: "project = ENG"}, 0)
+	if err == nil {
+		t.Fatal("expected error when the pagination token does not advance")
+	}
+	if calls > 3 {
+		t.Fatalf("expected to abort quickly, made %d calls", calls)
 	}
 }
 

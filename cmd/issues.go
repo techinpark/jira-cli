@@ -84,6 +84,11 @@ func newIssuesSearchCommand() *cobra.Command {
 			if outputJSON() {
 				return writeJSON(cmd, result)
 			}
+			// Table output drops next_page_token, so warn when --all stopped at
+			// the page cap with results still pending (JSON exposes the token).
+			if all && result.NextPageToken != "" {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: stopped at the page cap with more results remaining; resume with --page-token %s (or use --json)\n", result.NextPageToken)
+			}
 			return output.RenderIssuesTable(cmd.OutOrStdout(), result.Issues)
 		},
 	}
