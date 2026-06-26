@@ -23,7 +23,10 @@ func TestLinksCommands(t *testing.T) {
 			_ = json.NewDecoder(r.Body).Decode(&linkBody)
 			w.WriteHeader(http.StatusCreated)
 		case r.URL.Path == "/rest/api/3/issue/ENG-1" && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(`{"id":"1","key":"ENG-1","fields":{"issuelinks":[{"id":"10","type":{"name":"Blocks","inward":"is blocked by","outward":"blocks"},"outwardIssue":{"key":"ENG-2"}}]}}`))
+			_, _ = w.Write([]byte(`{"id":"1","key":"ENG-1","fields":{"issuelinks":[` +
+				`{"id":"10","type":{"name":"Blocks","inward":"is blocked by","outward":"blocks"},"outwardIssue":{"key":"ENG-2"}},` +
+				`{"id":"11","type":{"name":"Blocks","inward":"is blocked by","outward":"blocks"},"inwardIssue":{"key":"ENG-3"}}` +
+				`]}}`))
 		case r.URL.Path == "/rest/api/3/issueLink/10" && r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -52,6 +55,18 @@ func TestLinksCommands(t *testing.T) {
 	out, err = executeRoot(t, nil, "links", "list", "ENG-1", "--profile", "work", "--json")
 	if err != nil || !strings.Contains(out, `"id": "10"`) {
 		t.Fatalf("links list: out=%s err=%v", out, err)
+	}
+
+	// Table mode exercises direction extraction for both an outward link
+	// (blocks ENG-2) and an inward link (is blocked by ENG-3).
+	out, err = executeRoot(t, nil, "links", "list", "ENG-1", "--profile", "work")
+	if err != nil {
+		t.Fatalf("links list (table): out=%s err=%v", out, err)
+	}
+	for _, want := range []string{"blocks", "ENG-2", "is blocked by", "ENG-3"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("links list table missing %q: %s", want, out)
+		}
 	}
 
 	out, err = executeRoot(t, nil, "links", "delete", "10", "--profile", "work")
