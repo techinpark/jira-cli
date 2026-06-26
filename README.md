@@ -127,6 +127,25 @@ jira issues create \
   --field labels='["release","docs"]'
 ```
 
+### Metadata discovery
+
+To build a valid create/update payload without guessing, discover the available
+issue types, required fields, allowed values, and custom field IDs:
+
+```bash
+# valid issue types for a project
+jira issues create-meta --project ENG --json
+
+# createable fields for one issue type (required flags, allowed values, schema)
+jira issues create-meta --project ENG --type Bug --json
+
+# editable fields and allowed values for an existing issue
+jira issues edit-meta ENG-123 --json
+
+# map a human field name to its id, e.g. "Story Points" -> customfield_10016
+jira fields list --json
+```
+
 ## Attachments
 
 Jira Cloud cannot embed file attachments in the create-issue call, so `jira-cli`

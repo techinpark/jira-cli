@@ -334,6 +334,108 @@ func TestSearchPagination(t *testing.T) {
 	}
 }
 
+func TestMetadataDiscovery(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/3/issue/createmeta/ENG/issuetypes":
+			_, _ = w.Write([]byte(`{"issueTypes":[{"id":"10001","name":"Bug","subtask":false},{"id":"10002","name":"Task","subtask":false}]}`))
+		case "/rest/api/3/issue/createmeta/ENG/issuetypes/10001":
+			// Modern shape: fields under "results".
+			_, _ = w.Write([]byte(`{"results":[{"fieldId":"summary","name":"Summary","required":true,"schema":{"type":"string"}}]}`))
+		case "/rest/api/3/issue/createmeta/ENG/issuetypes/10002":
+			// Legacy shape: fields under "fields" — must still be returned.
+			_, _ = w.Write([]byte(`{"fields":[{"fieldId":"description","name":"Description","required":false,"schema":{"type":"string"}}]}`))
+		case "/rest/api/3/issue/ENG-1/editmeta":
+			_, _ = w.Write([]byte(`{"fields":{"summary":{"name":"Summary","required":true,"schema":{"type":"string"}}}}`))
+		case "/rest/api/3/field":
+			_, _ = w.Write([]byte(`[{"id":"summary","key":"summary","name":"Summary","custom":false,"schema":{"type":"string"}},{"id":"customfield_10016","key":"customfield_10016","name":"Story Points","custom":true,"schema":{"type":"number"}}]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	ctx := context.Background()
+
+	types, err := client.CreateMetaIssueTypes(ctx, "ENG")
+	if err != nil || len(types) != 2 || types[0]["id"] != "10001" || types[0]["name"] != "Bug" {
+		t.Fatalf("unexpected issue types: %+v err=%v", types, err)
+	}
+
+	// Name resolution + numeric passthrough + not-found.
+	if id, err := client.ResolveIssueTypeID(ctx, "ENG", "Bug"); err != nil || id != "10001" {
+		t.Fatalf("resolve name: %q err=%v", id, err)
+	}
+	if id, err := client.ResolveIssueTypeID(ctx, "ENG", "10002"); err != nil || id != "10002" {
+		t.Fatalf("numeric passthrough: %q err=%v", id, err)
+	}
+	if _, err := client.ResolveIssueTypeID(ctx, "ENG", "Nope"); err == nil {
+		t.Fatal("expected error for unknown issue type")
+	}
+
+	// results-shape fields.
+	fields, err := client.CreateMetaFields(ctx, "ENG", "10001")
+	if err != nil || len(fields) != 1 || fields[0]["fieldId"] != "summary" || fields[0]["required"] != true {
+		t.Fatalf("unexpected create-meta fields: %+v err=%v", fields, err)
+	}
+	// legacy fields-shape fallback.
+	legacy, err := client.CreateMetaFields(ctx, "ENG", "10002")
+	if err != nil || len(legacy) != 1 || legacy[0]["fieldId"] != "description" {
+		t.Fatalf("expected legacy fields fallback: %+v err=%v", legacy, err)
+	}
+
+	edit, err := client.EditMeta(ctx, "ENG-1")
+	if err != nil || edit["summary"] == nil {
+		t.Fatalf("unexpected editmeta: %+v err=%v", edit, err)
+	}
+
+	all, err := client.ListFields(ctx)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("unexpected fields list: %+v err=%v", all, err)
+	}
+	foundCustom := false
+	for _, f := range all {
+		if f["name"] == "Story Points" && f["id"] == "customfield_10016" {
+			foundCustom = true
+		}
+	}
+	if !foundCustom {
+		t.Fatalf("expected custom field in list: %+v", all)
+	}
+}
+
+func TestCreateMetaPaginatesAllPages(t *testing.T) {
+	var startAts []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/issue/createmeta/ENG/issuetypes" {
+			http.NotFound(w, r)
+			return
+		}
+		startAts = append(startAts, r.URL.Query().Get("startAt"))
+		switch r.URL.Query().Get("startAt") {
+		case "0":
+			_, _ = w.Write([]byte(`{"issueTypes":[{"id":"1","name":"A"}],"total":2,"maxResults":200,"startAt":0}`))
+		case "1":
+			_, _ = w.Write([]byte(`{"issueTypes":[{"id":"2","name":"B"}],"total":2,"maxResults":200,"startAt":1}`))
+		default:
+			t.Fatalf("unexpected startAt: %q", r.URL.Query().Get("startAt"))
+		}
+	}))
+	defer server.Close()
+
+	types, err := newTestClient(server.URL).CreateMetaIssueTypes(context.Background(), "ENG")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(types) != 2 || types[0]["id"] != "1" || types[1]["id"] != "2" {
+		t.Fatalf("expected both pages, got %+v", types)
+	}
+	if len(startAts) != 2 || startAts[0] != "0" || startAts[1] != "1" {
+		t.Fatalf("expected startAt 0 then 1, got %+v", startAts)
+	}
+}
+
 func TestSearchAllAbortsOnStuckToken(t *testing.T) {
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

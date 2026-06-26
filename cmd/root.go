@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,6 +55,7 @@ func init() {
 	rootCmd.AddCommand(newWorklogsCommand())
 	rootCmd.AddCommand(newUsersCommand())
 	rootCmd.AddCommand(newAttachmentsCommand())
+	rootCmd.AddCommand(newFieldsCommand())
 	rootCmd.AddCommand(newRawCommand())
 }
 
@@ -125,4 +127,39 @@ func writeJSON(cmd *cobra.Command, value any) error {
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	return enc.Encode(value)
+}
+
+// mapString reads a string field from a decoded JSON object.
+func mapString(m map[string]any, key string) string {
+	if s, ok := m[key].(string); ok {
+		return s
+	}
+	return ""
+}
+
+// mapYesNo renders a boolean JSON field as yes/no for table output.
+func mapYesNo(m map[string]any, key string) string {
+	if b, ok := m[key].(bool); ok && b {
+		return "yes"
+	}
+	return "no"
+}
+
+// mapSchemaType reads the nested schema.type of a Jira field metadata object.
+func mapSchemaType(m map[string]any) string {
+	if schema, ok := m["schema"].(map[string]any); ok {
+		if t, ok := schema["type"].(string); ok {
+			return t
+		}
+	}
+	return ""
+}
+
+// mapArrayLen renders the length of a JSON array field for table output (the
+// count of allowedValues), or "-" when absent. Full values stay in --json.
+func mapArrayLen(m map[string]any, key string) string {
+	if arr, ok := m[key].([]any); ok && len(arr) > 0 {
+		return strconv.Itoa(len(arr))
+	}
+	return "-"
 }
